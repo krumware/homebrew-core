@@ -25,10 +25,19 @@ class Arrayfire < Formula
   depends_on "openblas"
   depends_on "spdlog"
 
+  uses_from_macos "llvm" => :build
+
   on_linux do
     depends_on "opencl-headers" => :build
+    depends_on "mesa" => :test
     depends_on "opencl-icd-loader"
-    depends_on "pocl"
+  end
+
+  fails_with :gcc do
+    cause <<~CAUSE
+      Building with GCC and CMake CXX_EXTENSIONS disabled causes OpenCL headers
+      to not expose cl_image_desc.mem_object which is needed by Boost.Compute.
+    CAUSE
   end
 
   # Backport fix for missing include for climits header
@@ -67,10 +76,19 @@ class Arrayfire < Formula
   end
 
   test do
+    ENV.method(DevelopmentTools.default_compiler).call if OS.linux?
     cp pkgshare/"examples/helloworld/helloworld.cpp", testpath/"test.cpp"
     system ENV.cxx, "-std=c++11", "test.cpp", "-L#{lib}", "-laf", "-lafcpu", "-o", "test"
     # OpenCL does not work in CI.
     return if Hardware::CPU.arm? && OS.mac? && MacOS.version >= :monterey && ENV["HOMEBREW_GITHUB_ACTIONS"].present?
+
+    ENV["OCL_ICD_FILENAMES"] = "libRusticlOpenCL.so" if OS.linux?
+    ENV["RUSTICL_ENABLE"] = "llvmpipe"
+    ENV["AF_PRINT_ERRORS"] = "1"
+    ENV["AF_TRACE"] = "all"
+    ENV["AF_JIT_KERNEL_TRACE"] = "stdout"
+    ENV["AF_OPENCL_SHOW_BUILD_INFO"] = "1"
+    system "./test"
 
     assert_match "ArrayFire v#{version}", shell_output("./test")
   end
